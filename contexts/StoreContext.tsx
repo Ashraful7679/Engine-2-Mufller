@@ -52,6 +52,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     
     // If DB is not configured, use mock data immediately
     if (!isSupabaseConfigured) {
+      console.log("Loading Mock Data (Offline Mode)");
       setProducts(INITIAL_PRODUCTS);
       setServices(INITIAL_SERVICES);
       setTransactions([]);
@@ -62,6 +63,8 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     }
 
     try {
+      console.log("Connecting to Supabase...");
+      
       // 1. Products
       const { data: prodData, error: prodError } = await supabase.from('products').select('*');
       if (prodError) throw prodError;
@@ -69,11 +72,13 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       if (prodData && prodData.length > 0) {
         const mappedProds = prodData.map((p: any) => ({
             ...p,
-            buyingPrice: p.buying_price,
-            sellingPrice: p.selling_price
+            buyingPrice: Number(p.buying_price),
+            sellingPrice: Number(p.selling_price),
+            stock: Number(p.stock)
         }));
         setProducts(mappedProds);
       } else {
+        console.log("Seeding Products...");
         // SEED PRODUCTS if table exists but is empty
         const seedProds = INITIAL_PRODUCTS.map(p => ({
             id: p.id,
@@ -85,8 +90,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             selling_price: p.sellingPrice,
             stock: p.stock
         }));
-        await supabase.from('products').insert(seedProds);
-        setProducts(INITIAL_PRODUCTS);
+        const { error: seedErr } = await supabase.from('products').insert(seedProds);
+        if (seedErr) console.error("Product Seed Error:", seedErr);
+        else setProducts(INITIAL_PRODUCTS);
       }
 
       // 2. Services
@@ -96,9 +102,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       if (servData && servData.length > 0) {
          setServices(servData as Service[]);
       } else {
+        console.log("Seeding Services...");
         // SEED SERVICES
-        await supabase.from('services').insert(INITIAL_SERVICES);
-        setServices(INITIAL_SERVICES);
+        // Supabase might limit large inserts, but ~60 items is usually fine.
+        const { error: seedErr } = await supabase.from('services').insert(INITIAL_SERVICES);
+        if (seedErr) console.error("Service Seed Error:", seedErr);
+        else setServices(INITIAL_SERVICES);
       }
 
       // 3. Customers
@@ -115,12 +124,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
               customerPhone: t.customer_phone,
               vehicleModel: t.vehicle_model,
               mechanicName: t.mechanic_name,
-              productTotal: t.product_total,
-              serviceTotal: t.service_total,
-              productDiscount: t.product_discount,
-              serviceDiscount: t.service_discount,
-              totalAmount: t.total_amount,
-              totalProfit: t.total_profit,
+              productTotal: Number(t.product_total),
+              serviceTotal: Number(t.service_total),
+              productDiscount: Number(t.product_discount),
+              serviceDiscount: Number(t.service_discount),
+              totalAmount: Number(t.total_amount),
+              totalProfit: Number(t.total_profit),
               createdBy: t.created_by,
               createdByName: t.created_by_name,
               items: t.items // JSONB column maps directly to array
@@ -133,13 +142,14 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
       if (cfData) {
         setCashFlows(cfData.map((c: any) => ({
           ...c,
-          timestamp: Number(c.timestamp)
+          timestamp: Number(c.timestamp),
+          amount: Number(c.amount)
         })));
       }
 
     } catch (error: any) {
       console.error("Error fetching data (using offline fallback):", error.message || JSON.stringify(error));
-      // FALLBACK for offline/missing credentials
+      // FALLBACK for offline/missing credentials/network error
       setProducts(INITIAL_PRODUCTS);
       setServices(INITIAL_SERVICES);
       setTransactions([]);
@@ -170,8 +180,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
             selling_price: newProduct.sellingPrice,
             stock: newProduct.stock
         };
-        await supabase.from('products').insert(dbPayload);
-      } catch (e) { console.error("DB Insert Failed", e); }
+        const { error } = await supabase.from('products').insert(dbPayload);
+        if (error) {
+          console.error("DB Insert Failed", error);
+          alert("Failed to save product to database. Check console.");
+        }
+      } catch (e) { console.error("DB Insert Exception", e); }
     }
   };
 
@@ -188,8 +202,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           if (updates.category) dbUpdates.category = updates.category;
           if (updates.sku) dbUpdates.sku = updates.sku;
 
-          await supabase.from('products').update(dbUpdates).eq('id', id);
-        } catch (e) { console.error("DB Update Failed", e); }
+          const { error } = await supabase.from('products').update(dbUpdates).eq('id', id);
+          if (error) console.error("DB Update Failed", error);
+        } catch (e) { console.error("DB Update Exception", e); }
       }
   };
 
@@ -198,8 +213,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     setServices(prev => [...prev, newService]);
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('services').insert(newService);
-      } catch (e) { console.error("DB Insert Failed", e); }
+        const { error } = await supabase.from('services').insert(newService);
+        if (error) {
+           console.error("DB Insert Failed", error);
+           alert("Failed to save service to database.");
+        }
+      } catch (e) { console.error("DB Insert Exception", e); }
     }
   };
 
@@ -207,8 +226,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     setServices(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('services').update(updates).eq('id', id);
-      } catch (e) { console.error("DB Update Failed", e); }
+        const { error } = await supabase.from('services').update(updates).eq('id', id);
+        if (error) console.error("DB Update Failed", error);
+      } catch (e) { console.error("DB Update Exception", e); }
     }
   };
 
@@ -302,9 +322,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
 
       try {
         const { error } = await supabase.from('transactions').insert(dbTx);
-        if (error) throw error;
+        if (error) {
+          console.error("Transaction DB Sync Failed", error);
+          alert("Error: Transaction not saved to database! Check connection.");
+        }
       } catch (e) {
-        console.error("Transaction DB Sync Failed", e);
+        console.error("Transaction DB Exception", e);
       }
     }
   };
@@ -320,7 +343,6 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   };
   
   const canEditTransaction = (transaction: Transaction): boolean => {
-    // Same rules as delete for now: Admin anytime, Manager 12 mins
     return canDeleteTransaction(transaction);
   };
 
@@ -342,8 +364,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
     
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('transactions').delete().eq('id', transactionId);
-      } catch (e) { console.error("DB Delete Failed", e); }
+        const { error } = await supabase.from('transactions').delete().eq('id', transactionId);
+        if (error) console.error("DB Delete Failed", error);
+      } catch (e) { console.error("DB Delete Exception", e); }
     }
     return true;
   };
@@ -363,8 +386,9 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         if (updates.productDiscount !== undefined) dbUpdates.product_discount = updates.productDiscount;
         if (updates.serviceDiscount !== undefined) dbUpdates.service_discount = updates.serviceDiscount;
 
-        await supabase.from('transactions').update(dbUpdates).eq('id', id);
-      } catch (e) { console.error("DB Transaction Update Failed", e); }
+        const { error } = await supabase.from('transactions').update(dbUpdates).eq('id', id);
+        if (error) console.error("DB Transaction Update Failed", error);
+      } catch (e) { console.error("DB Transaction Update Exception", e); }
     }
   };
 
@@ -381,7 +405,7 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
 
     if (isSupabaseConfigured) {
       try {
-        await supabase.from('cash_flow').insert({
+        const { error } = await supabase.from('cash_flow').insert({
           id: newEntry.id,
           type: newEntry.type,
           category: newEntry.category,
@@ -390,7 +414,12 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
           timestamp: newEntry.timestamp,
           created_by: newEntry.createdBy
         });
-      } catch (e) { console.error("DB CashFlow Insert Failed", e); }
+
+        if (error) {
+            console.error("DB CashFlow Insert Failed", error);
+            alert(`Error saving to database: ${error.message || 'Unknown error'}`);
+        }
+      } catch (e) { console.error("DB CashFlow Exception", e); }
     }
   };
 

@@ -35,8 +35,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setAllUsers(data as User[]);
       } else {
         // Seed users if empty
+        console.log("Seeding Users...");
         const { error: insertError } = await supabase.from('users').insert(MOCK_USERS);
         if (!insertError) setAllUsers(MOCK_USERS);
+        else console.error("User Seed Error:", insertError);
       }
     } catch (err) {
       console.error("Error loading users:", JSON.stringify(err));
